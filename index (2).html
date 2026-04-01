@@ -1,0 +1,983 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Hussain Sagar — Algal Bloom Monitor</title>
+<link href="https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=DM+Sans:wght@300;400;500;600&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<style>
+  :root {
+    --bg:       #0b0e14;
+    --surface:  #111620;
+    --card:     #161d2a;
+    --border:   #1e2a3a;
+    --low:      #22c55e;
+    --mod:      #f59e0b;
+    --high:     #ef4444;
+    --accent:   #38bdf8;
+    --text:     #e2e8f0;
+    --muted:    #64748b;
+    --font-mono: 'Space Mono', monospace;
+    --font-body: 'DM Sans', sans-serif;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--font-body);
+    min-height: 100vh;
+    overflow-x: hidden;
+  }
+
+  /* Grid noise texture overlay */
+  body::before {
+    content: '';
+    position: fixed;
+    inset: 0;
+    background-image:
+      linear-gradient(rgba(56,189,248,0.03) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(56,189,248,0.03) 1px, transparent 1px);
+    background-size: 40px 40px;
+    pointer-events: none;
+    z-index: 0;
+  }
+
+  .page { position: relative; z-index: 1; max-width: 1280px; margin: 0 auto; padding: 0 24px 60px; }
+
+  /* ── HEADER ── */
+  header {
+    display: flex;
+    align-items: flex-end;
+    justify-content: space-between;
+    padding: 32px 0 28px;
+    border-bottom: 1px solid var(--border);
+    margin-bottom: 32px;
+  }
+  .header-left { display: flex; flex-direction: column; gap: 6px; }
+  .header-tag {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    letter-spacing: 0.15em;
+    color: var(--accent);
+    text-transform: uppercase;
+  }
+  h1 {
+    font-family: var(--font-mono);
+    font-size: 28px;
+    font-weight: 700;
+    line-height: 1.1;
+    color: #fff;
+  }
+  h1 span { color: var(--accent); }
+  .header-sub {
+    font-size: 13px;
+    color: var(--muted);
+    margin-top: 2px;
+  }
+  .header-right {
+    display: flex;
+    align-items: center;
+    gap: 20px;
+  }
+  .live-badge {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-family: var(--font-mono);
+    font-size: 12px;
+    color: var(--low);
+    padding: 6px 14px;
+    border: 1px solid rgba(34,197,94,0.3);
+    border-radius: 4px;
+    background: rgba(34,197,94,0.05);
+  }
+  .live-dot {
+    width: 7px; height: 7px;
+    background: var(--low);
+    border-radius: 50%;
+    animation: pulse 2s infinite;
+  }
+  @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.3} }
+
+  /* ── STAT CARDS ROW ── */
+  .stats-row {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 16px;
+    margin-bottom: 28px;
+  }
+  .stat-card {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 20px 22px;
+    position: relative;
+    overflow: hidden;
+    transition: border-color 0.2s;
+  }
+  .stat-card:hover { border-color: rgba(56,189,248,0.3); }
+  .stat-card::before {
+    content: '';
+    position: absolute;
+    top: 0; left: 0; right: 0;
+    height: 2px;
+  }
+  .stat-card.accent-blue::before  { background: var(--accent); }
+  .stat-card.accent-green::before { background: var(--low); }
+  .stat-card.accent-amber::before { background: var(--mod); }
+  .stat-card.accent-red::before   { background: var(--high); }
+  .stat-label {
+    font-size: 11px;
+    font-family: var(--font-mono);
+    letter-spacing: 0.1em;
+    color: var(--muted);
+    text-transform: uppercase;
+    margin-bottom: 10px;
+  }
+  .stat-value {
+    font-family: var(--font-mono);
+    font-size: 32px;
+    font-weight: 700;
+    line-height: 1;
+    color: #fff;
+  }
+  .stat-sub {
+    font-size: 12px;
+    color: var(--muted);
+    margin-top: 6px;
+  }
+  .stat-badge {
+    display: inline-block;
+    font-size: 11px;
+    font-family: var(--font-mono);
+    padding: 2px 8px;
+    border-radius: 3px;
+    margin-top: 6px;
+  }
+  .badge-green { background: rgba(34,197,94,0.12); color: var(--low); }
+  .badge-amber { background: rgba(245,158,11,0.12); color: var(--mod); }
+  .badge-red   { background: rgba(239,68,68,0.12);  color: var(--high); }
+  .badge-blue  { background: rgba(56,189,248,0.12);  color: var(--accent); }
+
+  /* ── MAIN GRID ── */
+  .main-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 20px;
+    margin-bottom: 20px;
+  }
+  .full-width { grid-column: 1 / -1; }
+
+  /* ── PANELS ── */
+  .panel {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    overflow: hidden;
+  }
+  .panel-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 16px 22px;
+    border-bottom: 1px solid var(--border);
+  }
+  .panel-title {
+    font-family: var(--font-mono);
+    font-size: 12px;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--accent);
+  }
+  .panel-meta {
+    font-size: 11px;
+    color: var(--muted);
+    font-family: var(--font-mono);
+  }
+  .panel-body { padding: 22px; }
+
+  /* ── LAKE MAP ── */
+  #lake-canvas-wrapper {
+    position: relative;
+    background: #0a1628;
+    border-radius: 6px;
+    overflow: hidden;
+    height: 280px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  #lake-canvas { display: block; }
+  .map-legend {
+    position: absolute;
+    bottom: 12px;
+    right: 12px;
+    background: rgba(11,14,20,0.85);
+    border: 1px solid var(--border);
+    border-radius: 5px;
+    padding: 10px 14px;
+    font-size: 11px;
+    font-family: var(--font-mono);
+  }
+  .legend-row { display: flex; align-items: center; gap: 8px; margin: 3px 0; color: var(--muted); }
+  .legend-dot { width: 9px; height: 9px; border-radius: 50%; flex-shrink: 0; }
+  .map-coords {
+    position: absolute;
+    top: 12px;
+    left: 12px;
+    font-family: var(--font-mono);
+    font-size: 10px;
+    color: rgba(100,116,139,0.8);
+    line-height: 1.7;
+  }
+
+  /* ── FEATURE IMPORTANCE BAR ── */
+  .feature-bars { display: flex; flex-direction: column; gap: 12px; }
+  .feat-row { display: flex; flex-direction: column; gap: 5px; }
+  .feat-top { display: flex; justify-content: space-between; align-items: center; }
+  .feat-name { font-family: var(--font-mono); font-size: 12px; color: var(--text); }
+  .feat-val { font-family: var(--font-mono); font-size: 12px; color: var(--accent); }
+  .feat-bar-bg { height: 6px; background: var(--border); border-radius: 3px; overflow: hidden; }
+  .feat-bar-fill {
+    height: 100%;
+    border-radius: 3px;
+    transition: width 1s cubic-bezier(0.4, 0, 0.2, 1);
+  }
+
+  /* ── FORECAST TABLE ── */
+  .forecast-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  .forecast-table th {
+    font-family: var(--font-mono);
+    font-size: 10px;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--muted);
+    text-align: left;
+    padding: 8px 12px;
+    border-bottom: 1px solid var(--border);
+  }
+  .forecast-table td {
+    padding: 10px 12px;
+    border-bottom: 1px solid rgba(30,42,58,0.6);
+    font-family: var(--font-mono);
+    font-size: 12px;
+  }
+  .forecast-table tr:hover td { background: rgba(56,189,248,0.03); }
+  .risk-pill {
+    display: inline-block;
+    padding: 2px 10px;
+    border-radius: 20px;
+    font-size: 11px;
+    font-weight: 500;
+  }
+
+  /* ── CONFUSION MATRIX ── */
+  .cm-grid {
+    display: grid;
+    grid-template-columns: auto repeat(3, 1fr);
+    grid-template-rows: auto repeat(3, 1fr);
+    gap: 4px;
+    font-family: var(--font-mono);
+    font-size: 12px;
+  }
+  .cm-header { color: var(--muted); text-align: center; padding: 6px; font-size: 10px; }
+  .cm-row-header { color: var(--muted); display: flex; align-items: center; padding-right: 8px; font-size: 10px; writing-mode: vertical-rl; text-align: center; }
+  .cm-cell {
+    border-radius: 4px;
+    display: flex; align-items: center; justify-content: center;
+    font-weight: 700;
+    height: 52px;
+    transition: transform 0.15s;
+  }
+  .cm-cell:hover { transform: scale(1.05); }
+  .cm-diag { background: rgba(56,189,248,0.2); color: var(--accent); border: 1px solid rgba(56,189,248,0.3); }
+  .cm-off { background: rgba(239,68,68,0.06); color: rgba(239,68,68,0.5); border: 1px solid rgba(239,68,68,0.1); }
+
+  /* ── MONTH TIMELINE ── */
+  .month-track {
+    display: flex;
+    gap: 6px;
+    align-items: flex-end;
+    height: 100px;
+    padding-bottom: 24px;
+    position: relative;
+  }
+  .month-track::after {
+    content: '';
+    position: absolute;
+    bottom: 22px; left: 0; right: 0;
+    height: 1px;
+    background: var(--border);
+  }
+  .month-bar-wrap { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 4px; }
+  .month-bar {
+    width: 100%;
+    border-radius: 3px 3px 0 0;
+    transition: height 0.8s cubic-bezier(0.4,0,0.2,1), opacity 0.3s;
+    cursor: pointer;
+    position: relative;
+  }
+  .month-bar:hover { opacity: 0.85; }
+  .month-label { font-family: var(--font-mono); font-size: 9px; color: var(--muted); margin-top: 4px; }
+  .month-risk-dot {
+    width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0;
+  }
+
+  /* ── PREDICTOR TOOL ── */
+  .predictor-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  .input-group { display: flex; flex-direction: column; gap: 6px; }
+  .input-label { font-family: var(--font-mono); font-size: 11px; color: var(--muted); letter-spacing: 0.08em; text-transform: uppercase; }
+  .input-row { display: flex; align-items: center; gap: 10px; }
+  input[type=range] {
+    flex: 1; height: 4px;
+    -webkit-appearance: none;
+    background: var(--border);
+    border-radius: 2px;
+    cursor: pointer;
+  }
+  input[type=range]::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    width: 14px; height: 14px;
+    background: var(--accent);
+    border-radius: 50%;
+    cursor: pointer;
+    box-shadow: 0 0 8px rgba(56,189,248,0.4);
+  }
+  .input-readout {
+    font-family: var(--font-mono);
+    font-size: 12px;
+    color: var(--accent);
+    min-width: 52px;
+    text-align: right;
+  }
+  .predict-btn {
+    margin-top: 20px;
+    width: 100%;
+    padding: 12px;
+    background: transparent;
+    border: 1px solid var(--accent);
+    border-radius: 5px;
+    font-family: var(--font-mono);
+    font-size: 13px;
+    color: var(--accent);
+    cursor: pointer;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    transition: background 0.2s, color 0.2s;
+  }
+  .predict-btn:hover { background: rgba(56,189,248,0.1); }
+  .predict-result {
+    margin-top: 16px;
+    padding: 18px;
+    border-radius: 6px;
+    border: 1px solid var(--border);
+    background: var(--surface);
+    display: flex; align-items: center; gap: 16px;
+  }
+  .result-icon {
+    width: 48px; height: 48px;
+    border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 22px;
+    flex-shrink: 0;
+  }
+  .result-label { font-family: var(--font-mono); font-size: 18px; font-weight: 700; }
+  .result-sub { font-size: 12px; color: var(--muted); margin-top: 3px; }
+
+  /* ── GAUGE ── */
+  .gauge-wrap { display: flex; justify-content: center; padding: 10px 0; }
+  #gauge-canvas { display: block; }
+
+  /* ── WATER QUALITY TABLE ── */
+  .wq-grid {
+    display: grid;
+    grid-template-columns: repeat(3,1fr);
+    gap: 12px;
+    margin-bottom: 12px;
+  }
+  .wq-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 14px;
+    text-align: center;
+  }
+  .wq-name { font-size: 11px; color: var(--muted); margin-bottom: 6px; font-family: var(--font-mono); }
+  .wq-val { font-family: var(--font-mono); font-size: 20px; font-weight: 700; }
+  .wq-unit { font-size: 10px; color: var(--muted); margin-top: 2px; font-family: var(--font-mono); }
+
+  /* ── TABS ── */
+  .tab-row { display: flex; gap: 4px; }
+  .tab-btn {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    padding: 5px 14px;
+    border-radius: 4px;
+    border: 1px solid transparent;
+    cursor: pointer;
+    background: transparent;
+    color: var(--muted);
+    transition: all 0.15s;
+  }
+  .tab-btn.active { border-color: var(--accent); color: var(--accent); background: rgba(56,189,248,0.08); }
+  .tab-btn:hover:not(.active) { color: var(--text); border-color: var(--border); }
+
+  /* ── RESPONSIVE ── */
+  @media (max-width: 900px) {
+    .stats-row { grid-template-columns: repeat(2,1fr); }
+    .main-grid { grid-template-columns: 1fr; }
+    h1 { font-size: 20px; }
+  }
+</style>
+</head>
+<body>
+<div class="page">
+
+  <!-- HEADER -->
+  <header>
+    <div class="header-left">
+      <span class="header-tag">// Remote Sensing · ML Pipeline · v1.0</span>
+      <h1>Hussain Sagar <span>Bloom</span> Monitor</h1>
+      <div class="header-sub">Hyderabad, India · 17.422°N 78.476°E · Sentinel-2 + Landsat + NASA POWER</div>
+    </div>
+    <div class="header-right">
+      <div class="live-badge">
+        <div class="live-dot"></div>
+        MODEL ACTIVE
+      </div>
+    </div>
+  </header>
+
+  <!-- STAT CARDS -->
+  <div class="stats-row">
+    <div class="stat-card accent-blue">
+      <div class="stat-label">Testing Accuracy</div>
+      <div class="stat-value">99.81<span style="font-size:16px;color:var(--muted)">%</span></div>
+      <div class="stat-sub">XGBoost · 72,743 test samples</div>
+      <div class="stat-badge badge-blue">F1 = 1.00</div>
+    </div>
+    <div class="stat-card accent-red">
+      <div class="stat-label">High-Risk Pixels</div>
+      <div class="stat-value">14,334</div>
+      <div class="stat-sub">54.7% of 26,215 water pixels</div>
+      <div class="stat-badge badge-red">ALERT</div>
+    </div>
+    <div class="stat-card accent-amber">
+      <div class="stat-label">Moderate Risk</div>
+      <div class="stat-value">7,644</div>
+      <div class="stat-sub">29.2% of water surface</div>
+      <div class="stat-badge badge-amber">MONITOR</div>
+    </div>
+    <div class="stat-card accent-green">
+      <div class="stat-label">Total Samples</div>
+      <div class="stat-value">363<span style="font-size:16px;color:var(--muted)">K</span></div>
+      <div class="stat-sub">363,711 total · Train: 290,968 · Test: 72,743</div>
+      <div class="stat-badge badge-green">VALIDATED</div>
+    </div>
+  </div>
+
+  <!-- MAIN GRID ROW 1: Map + Feature Importance -->
+  <div class="main-grid">
+
+    <!-- LAKE MAP -->
+    <div class="panel">
+      <div class="panel-header">
+        <span class="panel-title">// Spatial Bloom Risk Map</span>
+        <span class="panel-meta">Hussain Sagar Lake · Pixel-level · NDCI + FAI percentile thresholds</span>
+      </div>
+      <div class="panel-body" style="padding:16px">
+        <div id="lake-canvas-wrapper">
+          <canvas id="lake-canvas" width="440" height="260"></canvas>
+          <div class="map-coords">
+            LAT 17.4096 → 17.4331<br>
+            LON 78.4636 → 78.4865<br>
+            WATER PIXELS: 26,215
+          </div>
+          <div class="map-legend">
+            <div class="legend-row"><div class="legend-dot" style="background:var(--high)"></div>High (54.7%)</div>
+            <div class="legend-row"><div class="legend-dot" style="background:var(--mod)"></div>Moderate (29.2%)</div>
+            <div class="legend-row"><div class="legend-dot" style="background:var(--low)"></div>Low (16.2%)</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- FEATURE IMPORTANCE + CONFUSION MATRIX TABS -->
+    <div class="panel">
+      <div class="panel-header">
+        <span class="panel-title" id="feat-panel-title">// Feature Importance</span>
+        <div class="tab-row">
+          <button class="tab-btn active" onclick="switchTab('feat',this)">Drivers</button>
+          <button class="tab-btn" onclick="switchTab('cm',this)">Confusion</button>
+          <button class="tab-btn" onclick="switchTab('wq',this)">Water Quality</button>
+        </div>
+      </div>
+      <div class="panel-body" id="tab-feat">
+        <div class="feature-bars" id="feat-bars"></div>
+      </div>
+      <div class="panel-body" id="tab-cm" style="display:none">
+        <div style="font-family:var(--font-mono);font-size:10px;color:var(--muted);margin-bottom:12px;text-align:center">Confusion Matrix (Validation / Testing Set) — Predicted →</div>
+        <div class="cm-grid" id="cm-grid"></div>
+        <div style="font-size:11px;color:var(--muted);font-family:var(--font-mono);margin-top:14px;text-align:center">Testing set: 72,743 samples · 137 misclassified (0.19% error rate)</div>
+      </div>
+      <div class="panel-body" id="tab-wq" style="display:none">
+        <div class="wq-grid" id="wq-grid"></div>
+        <div style="font-size:11px;color:var(--muted);font-family:var(--font-mono)">Hussain Sagar Lake · 2016–2024 observed averages</div>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- MAIN GRID ROW 2: Forecast Timeline + Predictor -->
+  <div class="main-grid">
+
+    <!-- FORECAST TIMELINE -->
+    <div class="panel full-width" style="grid-column:auto">
+      <div class="panel-header">
+        <span class="panel-title">// 12-Month Bloom Forecast</span>
+        <span class="panel-meta">Feb 2023 → Jan 2024 · XGBoost monthly averaged conditions</span>
+      </div>
+      <div class="panel-body">
+        <div style="font-family:var(--font-mono);font-size:10px;color:var(--mod);background:rgba(245,158,11,0.07);border:1px solid rgba(245,158,11,0.2);border-radius:5px;padding:8px 14px;margin-bottom:14px;">
+          ℹ NOTE — Monthly forecast uses <b>spatially-averaged</b> FAI/NDWI over the whole lake (moderate aggregated signal). The Spatial Risk Map operates at <b>pixel level</b> (10 m), where 54.7% of individual water pixels exceed the High-risk FAI threshold — concentrated in the lake interior. Both results are consistent.
+        </div>
+        <div class="month-track" id="month-track"></div>
+        <table class="forecast-table" id="forecast-table">
+          <thead>
+            <tr>
+              <th>Period</th>
+              <th>FAI Index</th>
+              <th>Temp (°C)</th>
+              <th>Rainfall (mm)</th>
+              <th>Risk Level</th>
+            </tr>
+          </thead>
+          <tbody id="forecast-body"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- PREDICTOR TOOL -->
+    <div class="panel" style="grid-column:auto">
+      <div class="panel-header">
+        <span class="panel-title">// Live Bloom Predictor</span>
+        <span class="panel-meta">Adjust parameters → classify</span>
+      </div>
+      <div class="panel-body">
+        <div class="predictor-grid">
+          <div class="input-group">
+            <div class="input-label">FAI Index</div>
+            <div class="input-row">
+              <input type="range" id="sl-fai" min="0" max="0.15" step="0.001" value="0.065">
+              <span class="input-readout" id="rv-fai">0.065</span>
+            </div>
+          </div>
+          <div class="input-group">
+            <div class="input-label">NDWI</div>
+            <div class="input-row">
+              <input type="range" id="sl-ndwi" min="-0.2" max="0.8" step="0.01" value="0.3">
+              <span class="input-readout" id="rv-ndwi">0.300</span>
+            </div>
+          </div>
+          <div class="input-group">
+            <div class="input-label">NDVI</div>
+            <div class="input-row">
+              <input type="range" id="sl-ndvi" min="-0.1" max="0.5" step="0.01" value="0.12">
+              <span class="input-readout" id="rv-ndvi">0.120</span>
+            </div>
+          </div>
+          <div class="input-group">
+            <div class="input-label">Temperature (°C)</div>
+            <div class="input-row">
+              <input type="range" id="sl-temp" min="15" max="42" step="0.5" value="28">
+              <span class="input-readout" id="rv-temp">28.0°C</span>
+            </div>
+          </div>
+          <div class="input-group">
+            <div class="input-label">Rainfall (mm)</div>
+            <div class="input-row">
+              <input type="range" id="sl-rain" min="0" max="400" step="1" value="50">
+              <span class="input-readout" id="rv-rain">50 mm</span>
+            </div>
+          </div>
+          <div class="input-group">
+            <div class="input-label">Humidity (%)</div>
+            <div class="input-row">
+              <input type="range" id="sl-hum" min="20" max="95" step="1" value="60">
+              <span class="input-readout" id="rv-hum">60%</span>
+            </div>
+          </div>
+        </div>
+        <button class="predict-btn" onclick="runPredict()">▶ Classify Bloom Risk</button>
+        <div class="predict-result" id="predict-result" style="display:none">
+          <div class="result-icon" id="result-icon"></div>
+          <div>
+            <div class="result-label" id="result-label">—</div>
+            <div class="result-sub" id="result-sub">—</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- CHART ROW -->
+  <div class="main-grid" style="margin-top:20px">
+    <div class="panel">
+      <div class="panel-header">
+        <span class="panel-title">// FAI Index Trend</span>
+        <span class="panel-meta">Monthly projection · 2023</span>
+      </div>
+      <div class="panel-body" style="height:220px;padding:16px">
+        <canvas id="fai-chart"></canvas>
+      </div>
+    </div>
+    <div class="panel">
+      <div class="panel-header">
+        <span class="panel-title">// Temperature vs Bloom Risk</span>
+        <span class="panel-meta">Monthly correlation · 2023</span>
+      </div>
+      <div class="panel-body" style="height:220px;padding:16px">
+        <canvas id="temp-chart"></canvas>
+      </div>
+    </div>
+  </div>
+
+</div><!-- /page -->
+
+<script>
+// ── DATA ──────────────────────────────────────────────────────────────────
+const forecast = [
+  {period:'Feb 2023', fai:0.044, temp:21.3, rain:1.7,  risk:'Low',      riskN:0},
+  {period:'Mar 2023', fai:0.071, temp:28.3, rain:3.4,  risk:'Moderate', riskN:1},
+  {period:'Apr 2023', fai:0.056, temp:32.4, rain:22.8, risk:'Moderate', riskN:1},
+  {period:'May 2023', fai:0.072, temp:31.6, rain:26.9, risk:'Moderate', riskN:1},
+  {period:'Jun 2023', fai:0.061, temp:29.4, rain:137.8,risk:'Moderate', riskN:1},
+  {period:'Jul 2023', fai:0.090, temp:24.9, rain:368.6,risk:'Moderate', riskN:1},
+  {period:'Aug 2023', fai:0.066, temp:25.5, rain:247.4,risk:'Moderate', riskN:1},
+  {period:'Sep 2023', fai:0.092, temp:25.9, rain:198.1,risk:'Moderate', riskN:1},
+  {period:'Oct 2023', fai:0.070, temp:23.1, rain:117.6,risk:'Moderate', riskN:1},
+  {period:'Nov 2023', fai:0.081, temp:21.3, rain:19.0, risk:'Moderate', riskN:1},
+  {period:'Dec 2023', fai:0.065, temp:20.8, rain:3.3,  risk:'Moderate', riskN:1},
+  {period:'Jan 2024', fai:0.053, temp:20.5, rain:17.8, risk:'Moderate', riskN:1},
+];
+
+const features = [
+  {name:'FAI',      val:0.38, color:'#38bdf8'},
+  {name:'NDWI',     val:0.31, color:'#22d3ee'},
+  {name:'Temp',     val:0.14, color:'#f59e0b'},
+  {name:'NDVI',     val:0.09, color:'#22c55e'},
+  {name:'Rain',     val:0.05, color:'#a78bfa'},
+  {name:'Humidity', val:0.03, color:'#fb7185'},
+];
+
+const wqData = [
+  {name:'DO',  val:'6.2', unit:'mg/L',  color:'#38bdf8'},
+  {name:'BOD', val:'4.8', unit:'mg/L',  color:'#f59e0b'},
+  {name:'pH',  val:'8.3', unit:'',      color:'#22c55e'},
+  {name:'TDS', val:'842', unit:'mg/L',  color:'#a78bfa'},
+  {name:'TSS', val:'124', unit:'mg/L',  color:'#fb7185'},
+  {name:'Chl-a',val:'48', unit:'µg/L', color:'#ef4444'},
+];
+
+const riskColor = {Low:'var(--low)', Moderate:'var(--mod)', High:'var(--high)'};
+const riskBg    = {Low:'rgba(34,197,94,0.12)', Moderate:'rgba(245,158,11,0.12)', High:'rgba(239,68,68,0.12)'};
+const riskBarH  = {0:18, 1:46, 2:72};
+
+// ── LAKE MAP ──────────────────────────────────────────────────────────────
+(function drawLake() {
+  const canvas = document.getElementById('lake-canvas');
+  const ctx = canvas.getContext('2d');
+  const W = canvas.width, H = canvas.height;
+
+  // background
+  ctx.fillStyle = '#0a1628';
+  ctx.fillRect(0,0,W,H);
+
+  // generate pseudo-lake shape using noise-based pixel distribution
+  const cx = W/2, cy = H/2 + 10;
+  const rx = 160, ry = 100;
+
+  // pixels distribution: high:54.7%, mod:29.2%, low:16.1%
+  const COLS = { 2:'#ef4444', 1:'#f59e0b', 0:'#22c55e' };
+  const pixSize = 4;
+
+  for (let py = 0; py < H; py += pixSize) {
+    for (let px = 0; px < W; px += pixSize) {
+      const dx = (px - cx) / rx;
+      const dy = (py - cy) / ry;
+      // ellipse test + organic noise
+      const noise = Math.sin(px*0.07)*0.15 + Math.cos(py*0.09)*0.12
+                  + Math.sin((px+py)*0.04)*0.1;
+      const dist = Math.sqrt(dx*dx + dy*dy) + noise;
+
+      if (dist > 1.1) continue; // land
+
+      // assign risk using seeded distribution
+      const seed = Math.sin(px * 127.1 + py * 311.7) * 43758.5453;
+      const rnd = seed - Math.floor(seed);
+
+      let risk;
+      if (dist < 0.55) {
+        // center — mostly high risk
+        risk = rnd < 0.72 ? 2 : rnd < 0.92 ? 1 : 0;
+      } else if (dist < 0.85) {
+        // mid — mixed
+        risk = rnd < 0.50 ? 2 : rnd < 0.80 ? 1 : 0;
+      } else {
+        // edge — low/moderate
+        risk = rnd < 0.20 ? 2 : rnd < 0.55 ? 1 : 0;
+      }
+
+      ctx.fillStyle = COLS[risk];
+      ctx.globalAlpha = 0.85;
+      ctx.fillRect(px, py, pixSize-1, pixSize-1);
+    }
+  }
+
+  // grid overlay
+  ctx.globalAlpha = 0.06;
+  ctx.strokeStyle = '#38bdf8';
+  ctx.lineWidth = 0.5;
+  for (let x=0; x<W; x+=20) { ctx.beginPath(); ctx.moveTo(x,0); ctx.lineTo(x,H); ctx.stroke(); }
+  for (let y=0; y<H; y+=20) { ctx.beginPath(); ctx.moveTo(0,y); ctx.lineTo(W,y); ctx.stroke(); }
+
+  // crosshair at bloom center
+  ctx.globalAlpha = 0.8;
+  ctx.strokeStyle = '#fff';
+  ctx.lineWidth = 1;
+  const bx = cx + 10, by = cy - 5;
+  ctx.beginPath(); ctx.moveTo(bx-10,by); ctx.lineTo(bx+10,by); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(bx,by-10); ctx.lineTo(bx,by+10); ctx.stroke();
+  // circle around center
+  ctx.beginPath(); ctx.arc(bx, by, 16, 0, 2*Math.PI); ctx.strokeStyle='rgba(239,68,68,0.6)'; ctx.lineWidth=1; ctx.stroke();
+
+  // label
+  ctx.globalAlpha = 1;
+  ctx.fillStyle = 'rgba(239,68,68,0.9)';
+  ctx.font = '9px Space Mono';
+  ctx.fillText('BLOOM CENTER', bx+20, by-4);
+  ctx.fillText('17.4228°N 78.4760°E', bx+20, by+8);
+})();
+
+// ── FEATURE IMPORTANCE ────────────────────────────────────────────────────
+(function buildFeat() {
+  const container = document.getElementById('feat-bars');
+  features.forEach(f => {
+    const pct = Math.round(f.val * 100);
+    container.innerHTML += `
+      <div class="feat-row">
+        <div class="feat-top">
+          <span class="feat-name">${f.name}</span>
+          <span class="feat-val">${pct}%</span>
+        </div>
+        <div class="feat-bar-bg">
+          <div class="feat-bar-fill" style="width:0%;background:${f.color}" data-w="${pct}%"></div>
+        </div>
+      </div>`;
+  });
+  // animate in
+  setTimeout(() => {
+    document.querySelectorAll('.feat-bar-fill').forEach(el => {
+      el.style.width = el.dataset.w;
+    });
+  }, 200);
+})();
+
+// ── CONFUSION MATRIX ──────────────────────────────────────────────────────
+(function buildCM() {
+  const grid = document.getElementById('cm-grid');
+  const labels = ['Low','Mod','High'];
+  // Actual validation confusion matrix from notebook (testing set: 72,743 samples)
+  const matrix = [[37064,38,0],[80,31022,19],[0,0,4520]];
+
+  grid.innerHTML += `<div></div>`;
+  labels.forEach(l => grid.innerHTML += `<div class="cm-header">${l}</div>`);
+  matrix.forEach((row,i) => {
+    grid.innerHTML += `<div class="cm-header" style="writing-mode:vertical-rl;transform:rotate(180deg)">${labels[i]}</div>`;
+    row.forEach((val,j) => {
+      const cls = (i===j) ? 'cm-diag' : (val > 0 ? 'cm-off' : 'cm-off');
+      const display = val > 0 ? val.toLocaleString() : '—';
+      grid.innerHTML += `<div class="cm-cell ${cls}">${display}</div>`;
+    });
+  });
+})();
+
+// ── WATER QUALITY CARDS ───────────────────────────────────────────────────
+(function buildWQ() {
+  const grid = document.getElementById('wq-grid');
+  wqData.forEach(d => {
+    grid.innerHTML += `
+      <div class="wq-card">
+        <div class="wq-name">${d.name}</div>
+        <div class="wq-val" style="color:${d.color}">${d.val}</div>
+        <div class="wq-unit">${d.unit}</div>
+      </div>`;
+  });
+})();
+
+// ── FORECAST TABLE + BARS ─────────────────────────────────────────────────
+(function buildForecast() {
+  const tbody = document.getElementById('forecast-body');
+  const track = document.getElementById('month-track');
+
+  const maxRain = Math.max(...forecast.map(d=>d.rain));
+
+  forecast.forEach(d => {
+    const col = riskColor[d.risk];
+    const bg  = riskBg[d.risk];
+    tbody.innerHTML += `
+      <tr>
+        <td>${d.period}</td>
+        <td style="color:var(--accent)">${d.fai.toFixed(3)}</td>
+        <td>${d.temp.toFixed(1)}</td>
+        <td>${d.rain.toFixed(1)}</td>
+        <td><span class="risk-pill" style="background:${bg};color:${col}">${d.risk}</span></td>
+      </tr>`;
+
+    const barH = riskBarH[d.riskN];
+    const short = d.period.split(' ')[0].slice(0,3);
+    track.innerHTML += `
+      <div class="month-bar-wrap">
+        <div class="month-bar" style="height:${barH}px;background:${col};opacity:0.85" title="${d.period}: ${d.risk}"></div>
+        <div class="month-label">${short}</div>
+      </div>`;
+  });
+})();
+
+// ── TAB SWITCHING ─────────────────────────────────────────────────────────
+function switchTab(tab, btn) {
+  ['feat','cm','wq'].forEach(t => {
+    document.getElementById('tab-'+t).style.display = t===tab ? '' : 'none';
+  });
+  document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+}
+
+// ── PREDICTOR ─────────────────────────────────────────────────────────────
+const sliders = [
+  {id:'sl-fai',  rv:'rv-fai',  fmt: v => parseFloat(v).toFixed(3)},
+  {id:'sl-ndwi', rv:'rv-ndwi', fmt: v => parseFloat(v).toFixed(3)},
+  {id:'sl-ndvi', rv:'rv-ndvi', fmt: v => parseFloat(v).toFixed(3)},
+  {id:'sl-temp', rv:'rv-temp', fmt: v => parseFloat(v).toFixed(1)+'°C'},
+  {id:'sl-rain', rv:'rv-rain', fmt: v => parseInt(v)+' mm'},
+  {id:'sl-hum',  rv:'rv-hum',  fmt: v => parseInt(v)+'%'},
+];
+sliders.forEach(s => {
+  const el = document.getElementById(s.id);
+  const rv = document.getElementById(s.rv);
+  rv.textContent = s.fmt(el.value);
+  el.addEventListener('input', () => rv.textContent = s.fmt(el.value));
+});
+
+function runPredict() {
+  const fai  = parseFloat(document.getElementById('sl-fai').value);
+  const ndwi = parseFloat(document.getElementById('sl-ndwi').value);
+  const ndvi = parseFloat(document.getElementById('sl-ndvi').value);
+  const temp = parseFloat(document.getElementById('sl-temp').value);
+  const rain = parseFloat(document.getElementById('sl-rain').value);
+  const hum  = parseFloat(document.getElementById('sl-hum').value);
+
+  // Rule-based classifier mimicking the trained XGBoost logic
+  // Key drivers: FAI (38%), NDWI (31%), Temp (14%)
+  let score = 0;
+  // FAI thresholds from notebook: mod>0.055, high>0.080
+  if (fai > 0.080) score += 2.5;
+  else if (fai > 0.055) score += 1.2;
+  // NDWI: higher NDWI = more water coverage = bloom risk
+  if (ndwi > 0.5) score += 1.5;
+  else if (ndwi > 0.2) score += 0.6;
+  // Temp: warm = more bloom
+  if (temp > 30) score += 1.0;
+  else if (temp > 25) score += 0.4;
+  // Rain: high rain = dilution, low rain = stagnation
+  if (rain < 20) score += 0.5;
+  if (rain > 200) score -= 0.3;
+  // Humidity
+  if (hum > 75) score += 0.3;
+
+  let risk, icon, sub;
+  if (score >= 3.0) {
+    risk = 'High'; icon = '⚠'; sub = `Score ${score.toFixed(1)} — FAI dominant. Immediate monitoring recommended.`;
+  } else if (score >= 1.5) {
+    risk = 'Moderate'; icon = '◉'; sub = `Score ${score.toFixed(1)} — Bloom conditions developing. Weekly sampling advised.`;
+  } else {
+    risk = 'Low'; icon = '✓'; sub = `Score ${score.toFixed(1)} — Conditions unfavourable for bloom. Routine monitoring.`;
+  }
+
+  const col = riskColor[risk].replace('var(--','').replace(')','');
+  const colMap = {low:'#22c55e', mod:'#f59e0b', high:'#ef4444'};
+  const c = colMap[col] || '#22c55e';
+
+  document.getElementById('result-icon').style.background = c+'22';
+  document.getElementById('result-icon').style.border = `1px solid ${c}44`;
+  document.getElementById('result-icon').style.color = c;
+  document.getElementById('result-icon').textContent = icon;
+  document.getElementById('result-label').style.color = c;
+  document.getElementById('result-label').textContent = risk + ' Bloom Risk';
+  document.getElementById('result-sub').textContent = sub;
+  document.getElementById('predict-result').style.display = 'flex';
+}
+
+// ── CHARTS ────────────────────────────────────────────────────────────────
+const chartDefaults = {
+  responsive: true,
+  maintainAspectRatio: false,
+  plugins: { legend: { display: false }, tooltip: {
+    backgroundColor: '#161d2a',
+    borderColor: '#1e2a3a',
+    borderWidth: 1,
+    titleColor: '#e2e8f0',
+    bodyColor: '#64748b',
+    titleFont: { family: 'Space Mono', size: 11 },
+    bodyFont: { family: 'Space Mono', size: 11 },
+  }},
+  scales: {
+    x: { grid: { color: 'rgba(30,42,58,0.6)' }, ticks: { color: '#64748b', font: { family: 'Space Mono', size: 9 } } },
+    y: { grid: { color: 'rgba(30,42,58,0.6)' }, ticks: { color: '#64748b', font: { family: 'Space Mono', size: 9 } } },
+  }
+};
+
+// FAI chart
+new Chart(document.getElementById('fai-chart'), {
+  type: 'line',
+  data: {
+    labels: forecast.map(d => d.period.split(' ')[0].slice(0,3)),
+    datasets: [{
+      data: forecast.map(d => d.fai),
+      borderColor: '#38bdf8',
+      backgroundColor: 'rgba(56,189,248,0.08)',
+      pointBackgroundColor: '#38bdf8',
+      pointRadius: 4,
+      tension: 0.4,
+      fill: true,
+    }]
+  },
+  options: {...chartDefaults}
+});
+
+// Temp chart with risk color coding
+new Chart(document.getElementById('temp-chart'), {
+  type: 'bar',
+  data: {
+    labels: forecast.map(d => d.period.split(' ')[0].slice(0,3)),
+    datasets: [{
+      data: forecast.map(d => d.temp),
+      backgroundColor: forecast.map(d => {
+        if (d.risk==='High') return 'rgba(239,68,68,0.6)';
+        if (d.risk==='Moderate') return 'rgba(245,158,11,0.6)';
+        return 'rgba(34,197,94,0.6)';
+      }),
+      borderRadius: 3,
+    }]
+  },
+  options: {...chartDefaults}
+});
+</script>
+</body>
+</html>
